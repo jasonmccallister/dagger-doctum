@@ -1,0 +1,5 @@
+{
+  "name": "dagger-doctum",
+  "engineVersion": "v0.15.3",
+  "sdk": "go"
+}
