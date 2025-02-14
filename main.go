@@ -37,25 +37,36 @@ type DaggerDoctum struct {
 func New(
 	// The source directory containing the PHP files to document.
 	src *dagger.Directory,
+	// The version of Doctum to use.
 	// +optional
 	// +default="5.5.4"
 	version string,
+	// The image to use for building the documentation.
 	// +optional
 	// +default="php:8.3-cli-alpine"
 	image string,
+	// The path to the Doctum configuration file.
 	// +optional
-	configFile string,
-) *DaggerDoctum {
-	if configFile == "" {
-		configFile = DefaultConfigFile
+	configFile *dagger.File,
+) (*DaggerDoctum, error) {
+	var configuration string
+	if configFile == nil {
+		configuration = DefaultConfigFile
 	}
+
+	content, err := configFile.Contents(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	configuration = content
 
 	return &DaggerDoctum{
 		Version:    version,
 		Image:      image,
-		ConfigFile: configFile,
+		ConfigFile: configuration,
 		Source:     src,
-	}
+	}, nil
 }
 
 // Run builds the documentation for the given source directory.
