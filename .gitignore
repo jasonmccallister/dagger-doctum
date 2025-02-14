@@ -4,3 +4,4 @@
 /internal/dagger
 /internal/querybuilder
 /internal/telemetry
+/examples*

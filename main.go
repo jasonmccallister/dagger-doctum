@@ -17,50 +17,72 @@ package main
 import (
 	"context"
 	"dagger/dagger-doctum/internal/dagger"
-	"time"
+	"fmt"
 )
 
 const (
-	DoctumURL  = "https://doctum.long-term.support/releases/latest/doctum.phar"
-	ConfigFile = `<?php
+	DoctumURLFmt      = "https://doctum.long-term.support/releases/%s/doctum.phar"
+	DefaultConfigFile = `<?php
 
 return new Doctum\Doctum('/work/repository/');`
 )
 
-type DaggerDoctum struct{}
+type DaggerDoctum struct {
+	Version    string            // +private
+	Image      string            // +private
+	ConfigFile string            // +private
+	Source     *dagger.Directory // +private
+}
 
-func (m *DaggerDoctum) Run(
-	ctx context.Context,
+func New(
+	// The source directory containing the PHP files to document.
 	src *dagger.Directory,
-) *dagger.Directory {
-	return dag.Container(dagger.ContainerOpts{Platform: "linux/amd64"}).
-		From("php:8.2-cli-alpine").
+	// +optional
+	// +default="5.5.4"
+	version string,
+	// +optional
+	// +default="php:8.3-cli-alpine"
+	image string,
+	// +optional
+	configFile string,
+) *DaggerDoctum {
+	if configFile == "" {
+		configFile = DefaultConfigFile
+	}
+
+	return &DaggerDoctum{
+		Version:    version,
+		Image:      image,
+		ConfigFile: configFile,
+		Source:     src,
+	}
+}
+
+// Run builds the documentation for the given source directory.
+func (m *DaggerDoctum) Run(ctx context.Context) *dagger.Directory {
+	doctum := dag.Container().
+		From("alpine:latest").
+		WithExec([]string{"apk", "add", "--no-cache", "curl"}).
+		WithExec([]string{"curl", "-O", fmt.Sprintf(DoctumURLFmt, m.Version)}).
+		File("doctum.phar")
+
+	return dag.Container().
+		From(m.Image).
 		WithWorkdir("/work").
-		WithDirectory("/work/repository", src).
-		WithFile("/work/bin/doctum.phar", m.GetFile(), dagger.ContainerWithFileOpts{
+		WithDirectory("/work/repository", m.Source).
+		WithFile("/work/bin/doctum.phar", doctum, dagger.ContainerWithFileOpts{
 			Permissions: 0755,
 		}).
-		WithNewFile("/work/config/doctum.php", ConfigFile).
+		WithNewFile("/work/config/doctum.php", m.ConfigFile).
 		WithWorkdir("/work/docs").
-		WithEnvVariable("CACHE_BUST", time.Now().Format(time.RFC3339)).
 		WithExec([]string{"/work/bin/doctum.phar", "update", "/work/config/doctum.php", "-v"}).
 		Directory("/work/docs")
 }
 
-func (m *DaggerDoctum) GetFile() *dagger.File {
-	return dag.Container().From("alpine:latest").
-		WithExec([]string{"apk", "add", "--no-cache", "curl"}).
-		WithExec([]string{"curl", "-O", DoctumURL}).File("doctum.phar")
-}
-
-func (m *DaggerDoctum) Serve(ctx context.Context, src *dagger.Directory) *dagger.Service {
-	dir := m.Run(context.Background(), src)
-
-	// build an nginx service
+// Serve builds the documentation for the given source directory and serves it.
+func (m *DaggerDoctum) Serve(ctx context.Context) *dagger.Service {
 	return dag.Container().From("nginx:alpine").
-		WithDirectory("/usr/share/nginx/html", dir.Directory("build")).
-		WithDirectory("/usr/share/nginx/", dir.Directory("cache")).
-		Terminal().
-		WithExposedPort(8000).
+		WithDirectory("/usr/share/nginx/html", m.Run(context.Background()).Directory("build")).
+		WithExposedPort(80).
 		AsService()
 }
